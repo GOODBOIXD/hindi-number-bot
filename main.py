@@ -179,14 +179,14 @@ class HindiNumberBot:
             
             If you're not sure or it's not a valid Hindi number word, respond with "UNKNOWN"."""
             
-            response = await openai.ChatCompletion.acreate(
-                model="gpt-3.5-turbo",
-                messages=[{"role": "user", "content": prompt}],
+            response = openai.Completion.create(
+                engine="text-davinci-003",
+                prompt=prompt,
                 max_tokens=10,
                 temperature=0
             )
             
-            result = response.choices[0].message.content.strip()
+            result = response.choices[0].text.strip()
             
             # Try to extract number from response
             number_match = re.search(r'\b\d+\b', result)
@@ -242,17 +242,20 @@ Just send me a Hindi number word to try it out!"""
         # Try GPT fallback
         if self.openai_api_key:
             await update.message.reply_text("🤔 Checking with AI...")
-            gpt_number = await self.gpt_fallback(word)
-            
-            if gpt_number is not None:
-                # Double-check GPT result against our dictionary
-                confidence_msg = ""
-                closest = self.find_closest_match(str(gpt_number), threshold=60)
-                if closest != gpt_number:
-                    confidence_msg = " (AI guess - please verify)"
+            try:
+                gpt_number = await self.gpt_fallback(word)
                 
-                await update.message.reply_text(f"🤖 {word} → {gpt_number}{confidence_msg}")
-                return
+                if gpt_number is not None:
+                    # Double-check GPT result against our dictionary
+                    confidence_msg = ""
+                    closest = self.find_closest_match(str(gpt_number), threshold=60)
+                    if closest != gpt_number:
+                        confidence_msg = " (AI guess - please verify)"
+                    
+                    await update.message.reply_text(f"🤖 {word} → {gpt_number}{confidence_msg}")
+                    return
+            except Exception as e:
+                logger.error(f"GPT fallback error: {e}")
         
         # No match found
         await update.message.reply_text(
@@ -278,16 +281,27 @@ Just send me a Hindi number word to try it out!"""
         logger.info("Starting Hindi Number Bot...")
         
         # Use webhooks in production, polling for development
-        if os.getenv("RENDER"):  # Render.com environment
+        if os.getenv("RENDER") or os.getenv("PORT"):  # Render.com environment
             port = int(os.environ.get("PORT", 8000))
-            app.run_webhook(
-                listen="0.0.0.0",
-                port=port,
-                url_path=self.telegram_token,
-                webhook_url=f"https://{os.getenv('RENDER_EXTERNAL_HOSTNAME')}/{self.telegram_token}"
-            )
+            webhook_url = os.getenv("WEBHOOK_URL")
+            if not webhook_url:
+                # Construct webhook URL from Render environment
+                hostname = os.getenv("RENDER_EXTERNAL_HOSTNAME")
+                if hostname:
+                    webhook_url = f"https://{hostname}/{self.telegram_token}"
+            
+            if webhook_url:
+                app.run_webhook(
+                    listen="0.0.0.0",
+                    port=port,
+                    url_path=self.telegram_token,
+                    webhook_url=webhook_url
+                )
+            else:
+                logger.warning("No webhook URL found, falling back to polling")
+                app.run_polling(allowed_updates=Update.ALL_TYPES)
         else:
-            app.run_polling()
+            app.run_polling(allowed_updates=Update.ALL_TYPES)
 
 def main():
     """Main function"""
